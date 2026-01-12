@@ -143,15 +143,20 @@ export function AuthProvider({ children }) {
 
   const signOut = async () => {
     try {
-      const { error } = await supabase.auth.signOut();
-      if (!error) {
-        setUser(null);
-        setProfile(null);
-        setProfileError(null);
-        profileFetchedRef.current = false;
-      }
+      // Use scope: 'local' to avoid 403 errors with some Supabase configurations
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      // Always clear local state regardless of API response
+      setUser(null);
+      setProfile(null);
+      setProfileError(null);
+      profileFetchedRef.current = false;
       return { error };
     } catch (err) {
+      // Still clear local state on error
+      setUser(null);
+      setProfile(null);
+      setProfileError(null);
+      profileFetchedRef.current = false;
       return { error: err };
     }
   };

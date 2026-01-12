@@ -82,6 +82,24 @@ export default function DepartmentDashboard({ departmentCode }) {
   const [timeMetric, setTimeMetric] = useState('monthly');
   const [comparisonYear, setComparisonYear] = useState('prev_year');
 
+  // Historical stats for selected year (hybrid data source)
+  const [historicalStats, setHistoricalStats] = useState([]);
+
+  // Fetch historical stats when year changes
+  useEffect(() => {
+    const fetchHistoricalStats = async () => {
+      const { data } = await supabase
+        .from('historical_stats')
+        .select('*')
+        .eq('year', selectedYear)
+        .eq('department_code', departmentCode);
+      
+      setHistoricalStats(data || []);
+    };
+
+    fetchHistoricalStats();
+  }, [selectedYear, departmentCode]);
+
   // Get department info
   const deptInfo = DEPARTMENTS.find((d) => d.code === departmentCode);
   const deptName = deptInfo?.name || departmentCode;
@@ -90,6 +108,9 @@ export default function DepartmentDashboard({ departmentCode }) {
   const yearFilteredPlans = useMemo(() => {
     return plans.filter((plan) => (plan.year || CURRENT_YEAR) === selectedYear);
   }, [plans, selectedYear]);
+
+  // Check if viewing historical data (no real plans but has historical stats)
+  const isHistoricalView = yearFilteredPlans.length === 0 && historicalStats.length > 0;
 
   // Calculate comparison year value
   const comparisonYearValue = useMemo(() => {
@@ -127,19 +148,41 @@ export default function DepartmentDashboard({ departmentCode }) {
   }, [comparisonYearValue, departmentCode]);
 
   const hasComparisonData = comparisonPlans.length > 0 || comparisonHistorical.length > 0;
+  const hasCurrentData = yearFilteredPlans.length > 0 || historicalStats.length > 0;
   const comparisonLabel = comparisonYearValue ? `${comparisonYearValue}` : null;
 
-  // Calculate stats from year-filtered plans
+  // Calculate stats from year-filtered plans (with historical fallback)
   const stats = useMemo(() => {
-    const total = yearFilteredPlans.length;
-    const achieved = yearFilteredPlans.filter((p) => p.status === 'Achieved').length;
-    const inProgress = yearFilteredPlans.filter((p) => p.status === 'On Progress').length;
-    const pending = yearFilteredPlans.filter((p) => p.status === 'Pending').length;
-    const notAchieved = yearFilteredPlans.filter((p) => p.status === 'Not Achieved').length;
-    const rate = total > 0 ? Math.round((achieved / total) * 100) : 0;
+    // If we have real plans, calculate from them
+    if (yearFilteredPlans.length > 0) {
+      const total = yearFilteredPlans.length;
+      const achieved = yearFilteredPlans.filter((p) => p.status === 'Achieved').length;
+      const inProgress = yearFilteredPlans.filter((p) => p.status === 'On Progress').length;
+      const pending = yearFilteredPlans.filter((p) => p.status === 'Pending').length;
+      const notAchieved = yearFilteredPlans.filter((p) => p.status === 'Not Achieved').length;
+      const rate = total > 0 ? Math.round((achieved / total) * 100) : 0;
 
-    return { total, achieved, inProgress, pending, notAchieved, rate };
-  }, [yearFilteredPlans]);
+      return { total, achieved, inProgress, pending, notAchieved, rate, isHistorical: false };
+    }
+
+    // Fallback to historical stats - calculate average completion rate
+    if (historicalStats.length > 0) {
+      const avgRate = Math.round(
+        historicalStats.reduce((sum, h) => sum + h.completion_rate, 0) / historicalStats.length
+      );
+      return { 
+        total: 0, 
+        achieved: 0, 
+        inProgress: 0, 
+        pending: 0, 
+        notAchieved: 0, 
+        rate: avgRate, 
+        isHistorical: true 
+      };
+    }
+
+    return { total: 0, achieved: 0, inProgress: 0, pending: 0, notAchieved: 0, rate: 0, isHistorical: false };
+  }, [yearFilteredPlans, historicalStats]);
 
   // Chart 1: Performance Breakdown (by Strategy or PIC)
   const breakdownChartData = useMemo(() => {
@@ -175,54 +218,103 @@ export default function DepartmentDashboard({ departmentCode }) {
       .sort((a, b) => b.rate - a.rate);
   }, [yearFilteredPlans, breakdownMetric]);
 
-  // Chart 2: Time Analysis (Monthly or Quarterly)
+  // Chart 2: Time Analysis (Monthly or Quarterly) - with historical fallback
   const timeChartData = useMemo(() => {
-    const dataMap = {};
-    
-    yearFilteredPlans.forEach((plan) => {
-      let key;
-      if (timeMetric === 'monthly') {
-        key = plan.month || 'Unknown';
-      } else {
-        key = getQuarter(plan.month);
-      }
+    // If we have real plans, use them
+    if (yearFilteredPlans.length > 0) {
+      const dataMap = {};
       
-      if (!dataMap[key]) {
-        dataMap[key] = { total: 0, achieved: 0 };
-      }
-      dataMap[key].total++;
-      if (plan.status === 'Achieved') {
-        dataMap[key].achieved++;
-      }
-    });
+      yearFilteredPlans.forEach((plan) => {
+        let key;
+        if (timeMetric === 'monthly') {
+          key = plan.month || 'Unknown';
+        } else {
+          key = getQuarter(plan.month);
+        }
+        
+        if (!dataMap[key]) {
+          dataMap[key] = { total: 0, achieved: 0 };
+        }
+        dataMap[key].total++;
+        if (plan.status === 'Achieved') {
+          dataMap[key].achieved++;
+        }
+      });
 
-    const result = Object.entries(dataMap)
-      .map(([name, s]) => ({
-        name,
-        fullName: name,
-        rate: s.total > 0 ? Math.round((s.achieved / s.total) * 100) : 0,
-        total: s.total,
-        achieved: s.achieved,
-      }));
+      const result = Object.entries(dataMap)
+        .map(([name, s]) => ({
+          name,
+          fullName: name,
+          rate: s.total > 0 ? Math.round((s.achieved / s.total) * 100) : 0,
+          total: s.total,
+          achieved: s.achieved,
+        }));
 
-    // Sort appropriately
-    if (timeMetric === 'monthly') {
-      return result.sort(sortByMonth);
-    } else {
-      // Sort quarters Q1, Q2, Q3, Q4
-      return result.sort((a, b) => a.name.localeCompare(b.name));
+      // Sort appropriately
+      if (timeMetric === 'monthly') {
+        return result.sort(sortByMonth);
+      } else {
+        return result.sort((a, b) => a.name.localeCompare(b.name));
+      }
     }
-  }, [yearFilteredPlans, timeMetric]);
+
+    // Fallback to historical stats
+    if (historicalStats.length > 0) {
+      if (timeMetric === 'monthly') {
+        // Map historical stats to monthly chart data
+        return MONTHS_ORDER.map((month, idx) => {
+          const hist = historicalStats.find(h => h.month === idx + 1);
+          return {
+            name: month,
+            fullName: month,
+            rate: hist ? Math.round(hist.completion_rate) : 0,
+            total: 0,
+            achieved: 0,
+            isHistorical: true,
+          };
+        }).filter(d => d.rate > 0 || historicalStats.some(h => h.month === MONTH_ORDER[d.name] + 1));
+      } else {
+        // Aggregate historical stats by quarter
+        const quarterMap = { Q1: [], Q2: [], Q3: [], Q4: [] };
+        historicalStats.forEach((h) => {
+          const quarter = getQuarter(MONTHS_ORDER[h.month - 1]);
+          if (quarterMap[quarter]) {
+            quarterMap[quarter].push(h.completion_rate);
+          }
+        });
+
+        return ['Q1', 'Q2', 'Q3', 'Q4'].map((quarter) => ({
+          name: quarter,
+          fullName: quarter,
+          rate: quarterMap[quarter].length > 0 
+            ? Math.round(quarterMap[quarter].reduce((a, b) => a + b, 0) / quarterMap[quarter].length)
+            : 0,
+          total: 0,
+          achieved: 0,
+          isHistorical: true,
+        }));
+      }
+    }
+
+    return [];
+  }, [yearFilteredPlans, historicalStats, timeMetric]);
 
   // Benchmark chart data for Monthly view (current year bars + comparison year line)
   const benchmarkMonthlyData = useMemo(() => {
-    // Build current year data by month
+    // Build current year data by month from real plans
     const currentMap = {};
     yearFilteredPlans.forEach((plan) => {
       const month = plan.month || 'Unknown';
       if (!currentMap[month]) currentMap[month] = { total: 0, achieved: 0 };
       currentMap[month].total++;
       if (plan.status === 'Achieved') currentMap[month].achieved++;
+    });
+
+    // Build historical data map for current year (month number to rate)
+    const currentHistoricalMap = {};
+    historicalStats.forEach((h) => {
+      const monthName = MONTHS_ORDER[h.month - 1];
+      currentHistoricalMap[monthName] = h.completion_rate;
     });
 
     // Build comparison year data by month from real plans
@@ -246,10 +338,13 @@ export default function DepartmentDashboard({ departmentCode }) {
       const curr = currentMap[month];
       const comp = compMap[month];
       
-      // Current year value
-      const currentValue = curr && curr.total > 0 
-        ? Math.round((curr.achieved / curr.total) * 100) 
-        : null;
+      // Current year value: prefer real data, fall back to historical
+      let currentValue = null;
+      if (curr && curr.total > 0) {
+        currentValue = Math.round((curr.achieved / curr.total) * 100);
+      } else if (currentHistoricalMap[month] !== undefined) {
+        currentValue = Math.round(currentHistoricalMap[month]);
+      }
 
       // Comparison value: prefer real data, fall back to historical
       let comparisonValue = null;
@@ -265,19 +360,28 @@ export default function DepartmentDashboard({ departmentCode }) {
         comparison: comparisonValue,
       };
     });
-  }, [yearFilteredPlans, comparisonPlans, comparisonHistorical]);
+  }, [yearFilteredPlans, comparisonPlans, historicalStats, comparisonHistorical]);
 
   // Benchmark chart data for Quarterly view
   const benchmarkQuarterlyData = useMemo(() => {
     const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
     
-    // Build current year data by quarter
+    // Build current year data by quarter from real plans
     const currentMap = {};
     yearFilteredPlans.forEach((plan) => {
       const quarter = getQuarter(plan.month);
       if (!currentMap[quarter]) currentMap[quarter] = { total: 0, achieved: 0 };
       currentMap[quarter].total++;
       if (plan.status === 'Achieved') currentMap[quarter].achieved++;
+    });
+
+    // Build historical data for current year by quarter
+    const currentHistoricalByQuarter = { Q1: [], Q2: [], Q3: [], Q4: [] };
+    historicalStats.forEach((h) => {
+      const quarter = getQuarter(MONTHS_ORDER[h.month - 1]);
+      if (currentHistoricalByQuarter[quarter]) {
+        currentHistoricalByQuarter[quarter].push(h.completion_rate);
+      }
     });
 
     // Build comparison year data by quarter from real plans
@@ -303,10 +407,14 @@ export default function DepartmentDashboard({ departmentCode }) {
       const curr = currentMap[quarter];
       const comp = compMap[quarter];
       
-      // Current year value
-      const currentValue = curr && curr.total > 0 
-        ? Math.round((curr.achieved / curr.total) * 100) 
-        : null;
+      // Current year value: prefer real data, fall back to historical average
+      let currentValue = null;
+      if (curr && curr.total > 0) {
+        currentValue = Math.round((curr.achieved / curr.total) * 100);
+      } else if (currentHistoricalByQuarter[quarter].length > 0) {
+        const avg = currentHistoricalByQuarter[quarter].reduce((a, b) => a + b, 0) / currentHistoricalByQuarter[quarter].length;
+        currentValue = Math.round(avg);
+      }
 
       // Comparison value: prefer real data, fall back to historical average
       let comparisonValue = null;
@@ -323,7 +431,7 @@ export default function DepartmentDashboard({ departmentCode }) {
         comparison: comparisonValue,
       };
     });
-  }, [yearFilteredPlans, comparisonPlans, comparisonHistorical]);
+  }, [yearFilteredPlans, comparisonPlans, historicalStats, comparisonHistorical]);
 
   // Select the right benchmark data based on timeMetric
   const benchmarkChartData = timeMetric === 'monthly' ? benchmarkMonthlyData : benchmarkQuarterlyData;
@@ -409,7 +517,7 @@ export default function DepartmentDashboard({ departmentCode }) {
                 <Target className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{stats.total}</p>
+                <p className="text-2xl font-bold">{stats.isHistorical ? '—' : stats.total}</p>
                 <p className="text-teal-100 text-xs">Total Plans</p>
               </div>
             </div>
@@ -422,7 +530,9 @@ export default function DepartmentDashboard({ departmentCode }) {
               </div>
               <div>
                 <p className="text-2xl font-bold">{stats.rate}%</p>
-                <p className="text-emerald-100 text-xs">Completion Rate</p>
+                <p className="text-emerald-100 text-xs">
+                  {stats.isHistorical ? 'Avg. Rate (Historical)' : 'Completion Rate'}
+                </p>
               </div>
             </div>
           </div>
@@ -433,7 +543,7 @@ export default function DepartmentDashboard({ departmentCode }) {
                 <CheckCircle2 className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{stats.achieved}</p>
+                <p className="text-2xl font-bold">{stats.isHistorical ? '—' : stats.achieved}</p>
                 <p className="text-green-100 text-xs">Achieved</p>
               </div>
             </div>
@@ -445,7 +555,7 @@ export default function DepartmentDashboard({ departmentCode }) {
                 <Clock className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{stats.inProgress}</p>
+                <p className="text-2xl font-bold">{stats.isHistorical ? '—' : stats.inProgress}</p>
                 <p className="text-amber-100 text-xs">In Progress</p>
               </div>
             </div>
@@ -457,7 +567,7 @@ export default function DepartmentDashboard({ departmentCode }) {
                 <AlertCircle className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{stats.notAchieved + stats.pending}</p>
+                <p className="text-2xl font-bold">{stats.isHistorical ? '—' : stats.notAchieved + stats.pending}</p>
                 <p className="text-red-100 text-xs">Needs Attention</p>
               </div>
             </div>
@@ -522,13 +632,25 @@ export default function DepartmentDashboard({ departmentCode }) {
                 ]}
               />
             </div>
-            <PerformanceChart
-              data={breakdownChartData}
-              xKey="name"
-              yKey="rate"
-              height={280}
-              hideHeader
-            />
+            {isHistoricalView ? (
+              <div className="h-[280px] flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-200">
+                <div className="text-center px-6">
+                  <Target className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                  <p className="text-gray-500 text-sm font-medium">
+                    {breakdownMetric === 'goal_strategy' ? 'Strategy' : 'PIC'} breakdown not available
+                  </p>
+                  <p className="text-gray-400 text-xs mt-1">Historical data is stored at department level only</p>
+                </div>
+              </div>
+            ) : (
+              <PerformanceChart
+                data={breakdownChartData}
+                xKey="name"
+                yKey="rate"
+                height={280}
+                hideHeader
+              />
+            )}
           </div>
           
           {/* Right Chart: Time Analysis */}
@@ -626,8 +748,8 @@ export default function DepartmentDashboard({ departmentCode }) {
           </div>
         </div>
 
-        {/* Empty State */}
-        {yearFilteredPlans.length === 0 && (
+        {/* Empty State - only show if no real plans AND no historical data */}
+        {yearFilteredPlans.length === 0 && historicalStats.length === 0 && (
           <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
             <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
             <h3 className="text-lg font-semibold text-amber-800 mb-1">No Action Plans for {selectedYear}</h3>
@@ -635,6 +757,15 @@ export default function DepartmentDashboard({ departmentCode }) {
               {plans.length > 0 
                 ? `Try selecting a different year. You have ${plans.length} plans in other years.`
                 : 'Contact your administrator to add action plans for your department.'}
+            </p>
+          </div>
+        )}
+
+        {/* Historical Data Notice */}
+        {isHistoricalView && (
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+            <p className="text-blue-700 text-sm">
+              📊 Showing historical data for {selectedYear}. Strategy/PIC breakdown is not available for historical years.
             </p>
           </div>
         )}
