@@ -131,7 +131,8 @@ export default function AdminDashboard() {
     return plans.filter((plan) => (plan.year || CURRENT_YEAR) === selectedYear);
   }, [plans, selectedYear]);
 
-  const filteredPlans = useMemo(() => {
+  // Filter by date range
+  const dateFilteredPlans = useMemo(() => {
     if (!startDate && !endDate) return yearFilteredPlans;
     const start = startDate ? new Date(startDate) : null;
     const end = endDate ? new Date(endDate) : null;
@@ -144,12 +145,69 @@ export default function AdminDashboard() {
     });
   }, [yearFilteredPlans, startDate, endDate, selectedYear]);
 
+  // Filter by department search - this is the final filtered plans used everywhere
+  const filteredPlans = useMemo(() => {
+    if (!deptSearch.trim()) return dateFilteredPlans;
+    const query = deptSearch.toLowerCase();
+    return dateFilteredPlans.filter((plan) => {
+      const deptInfo = DEPARTMENTS.find((d) => d.code === plan.department_code);
+      const deptName = deptInfo?.name || '';
+      return (
+        plan.department_code?.toLowerCase().includes(query) ||
+        deptName.toLowerCase().includes(query)
+      );
+    });
+  }, [dateFilteredPlans, deptSearch]);
+
+  // Also filter historical stats by department search
+  const filteredHistoricalStats = useMemo(() => {
+    if (!deptSearch.trim()) return historicalStats;
+    const query = deptSearch.toLowerCase();
+    return historicalStats.filter((h) => {
+      const deptInfo = DEPARTMENTS.find((d) => d.code === h.department_code);
+      const deptName = deptInfo?.name || '';
+      return (
+        h.department_code?.toLowerCase().includes(query) ||
+        deptName.toLowerCase().includes(query)
+      );
+    });
+  }, [historicalStats, deptSearch]);
+
+  // Filter comparison historical stats by department search
+  const filteredComparisonHistorical = useMemo(() => {
+    if (!deptSearch.trim()) return comparisonHistorical;
+    const query = deptSearch.toLowerCase();
+    return comparisonHistorical.filter((h) => {
+      const deptInfo = DEPARTMENTS.find((d) => d.code === h.department_code);
+      const deptName = deptInfo?.name || '';
+      return (
+        h.department_code?.toLowerCase().includes(query) ||
+        deptName.toLowerCase().includes(query)
+      );
+    });
+  }, [comparisonHistorical, deptSearch]);
+
   // comparisonYearValue is already defined above
 
   const comparisonPlans = useMemo(() => {
     if (!comparisonYearValue) return [];
-    return plans.filter((plan) => (plan.year || CURRENT_YEAR) === comparisonYearValue);
-  }, [plans, comparisonYearValue]);
+    let filtered = plans.filter((plan) => (plan.year || CURRENT_YEAR) === comparisonYearValue);
+    
+    // Also apply department search filter to comparison plans
+    if (deptSearch.trim()) {
+      const query = deptSearch.toLowerCase();
+      filtered = filtered.filter((plan) => {
+        const deptInfo = DEPARTMENTS.find((d) => d.code === plan.department_code);
+        const deptName = deptInfo?.name || '';
+        return (
+          plan.department_code?.toLowerCase().includes(query) ||
+          deptName.toLowerCase().includes(query)
+        );
+      });
+    }
+    
+    return filtered;
+  }, [plans, comparisonYearValue, deptSearch]);
 
   // Get available years from data for dropdown
   const availableYearsInData = useMemo(() => {
@@ -174,7 +232,7 @@ export default function AdminDashboard() {
       if (plan.status === 'Achieved') deptMap[plan.department_code].achieved++;
     });
 
-    // Hybrid: For departments with no real data, use historical stats
+    // Hybrid: For departments with no real data, use filtered historical stats
     const byDepartment = [];
     const processedDepts = new Set();
 
@@ -194,7 +252,7 @@ export default function AdminDashboard() {
     // Then, add historical data for departments without real data
     // Group and average by department_code first
     const historicalByDept = {};
-    historicalStats.forEach((hist) => {
+    filteredHistoricalStats.forEach((hist) => {
       if (!processedDepts.has(hist.department_code)) {
         if (!historicalByDept[hist.department_code]) {
           historicalByDept[hist.department_code] = { sum: 0, count: 0 };
@@ -220,20 +278,20 @@ export default function AdminDashboard() {
     byDepartment.sort((a, b) => b.rate - a.rate);
 
     return { total, achieved, inProgress, pending, notAchieved, byDepartment };
-  }, [filteredPlans, historicalStats]);
+  }, [filteredPlans, filteredHistoricalStats]);
 
   // YoY Line Chart Data with dynamic comparison and historical fallback
   const yoyChartData = useMemo(() => {
-    // Build current year data from real plans
+    // Build current year data from real plans (already filtered by dept search)
     const currentYearMap = {};
-    yearFilteredPlans.forEach((plan) => {
+    filteredPlans.forEach((plan) => {
       const month = plan.month;
       if (!currentYearMap[month]) currentYearMap[month] = { total: 0, achieved: 0 };
       currentYearMap[month].total++;
       if (plan.status === 'Achieved') currentYearMap[month].achieved++;
     });
     
-    // Build comparison year data from real plans
+    // Build comparison year data from real plans (already filtered by dept search)
     const comparisonMap = {};
     comparisonPlans.forEach((plan) => {
       const month = plan.month;
@@ -242,36 +300,44 @@ export default function AdminDashboard() {
       if (plan.status === 'Achieved') comparisonMap[month].achieved++;
     });
 
-    // Build historical data maps (month number to rate)
+    // Build historical data maps (month number to rate) - using filtered historical stats
     const historicalMap = {};
-    historicalStats.forEach((h) => {
+    filteredHistoricalStats.forEach((h) => {
       const monthName = MONTHS_ORDER[h.month - 1];
-      historicalMap[monthName] = h.completion_rate;
+      if (!historicalMap[monthName]) {
+        historicalMap[monthName] = { sum: 0, count: 0 };
+      }
+      historicalMap[monthName].sum += h.completion_rate;
+      historicalMap[monthName].count++;
     });
 
     const compHistoricalMap = {};
-    comparisonHistorical.forEach((h) => {
+    filteredComparisonHistorical.forEach((h) => {
       const monthName = MONTHS_ORDER[h.month - 1];
-      compHistoricalMap[monthName] = h.completion_rate;
+      if (!compHistoricalMap[monthName]) {
+        compHistoricalMap[monthName] = { sum: 0, count: 0 };
+      }
+      compHistoricalMap[monthName].sum += h.completion_rate;
+      compHistoricalMap[monthName].count++;
     });
 
     return MONTHS_ORDER.map((month) => {
       const curr = currentYearMap[month];
       const comp = comparisonMap[month];
       
-      // Use real data if available, otherwise fall back to historical
+      // Use real data if available, otherwise fall back to historical (averaged if multiple depts)
       let mainValue = null;
       if (curr && curr.total > 0) {
         mainValue = Math.round((curr.achieved / curr.total) * 100);
-      } else if (historicalMap[month] !== undefined) {
-        mainValue = Math.round(historicalMap[month]);
+      } else if (historicalMap[month]) {
+        mainValue = Math.round(historicalMap[month].sum / historicalMap[month].count);
       }
 
       let compareValue = null;
       if (comp && comp.total > 0) {
         compareValue = Math.round((comp.achieved / comp.total) * 100);
-      } else if (compHistoricalMap[month] !== undefined) {
-        compareValue = Math.round(compHistoricalMap[month]);
+      } else if (compHistoricalMap[month]) {
+        compareValue = Math.round(compHistoricalMap[month].sum / compHistoricalMap[month].count);
       }
 
       return {
@@ -280,10 +346,10 @@ export default function AdminDashboard() {
         compare_value: compareValue,
       };
     });
-  }, [yearFilteredPlans, comparisonPlans, historicalStats, comparisonHistorical]);
+  }, [filteredPlans, comparisonPlans, filteredHistoricalStats, filteredComparisonHistorical]);
 
   // Check if we have any comparison data (real or historical)
-  const hasComparisonData = comparisonPlans.length > 0 || comparisonHistorical.length > 0;
+  const hasComparisonData = comparisonPlans.length > 0 || filteredComparisonHistorical.length > 0;
   const comparisonLabel = comparisonYearValue ? `${comparisonYearValue}` : null;
 
   // Calculate highlight range for ReferenceArea
@@ -309,11 +375,11 @@ export default function AdminDashboard() {
       return Object.entries(dataMap).map(([name, s]) => ({ name, fullName: s.fullName, rate: s.total > 0 ? Math.round((s.achieved / s.total) * 100) : 0, total: s.total, achieved: s.achieved })).sort((a, b) => b.rate - a.rate);
     }
     
-    // Fallback to historical stats (only for department view, not PIC)
-    if (orgMetric === 'department_code' && historicalStats.length > 0) {
+    // Fallback to filtered historical stats (only for department view, not PIC)
+    if (orgMetric === 'department_code' && filteredHistoricalStats.length > 0) {
       // Calculate average completion rate per department from monthly data
       const deptAvgMap = {};
-      historicalStats.forEach((h) => {
+      filteredHistoricalStats.forEach((h) => {
         if (!deptAvgMap[h.department_code]) {
           deptAvgMap[h.department_code] = { sum: 0, count: 0 };
         }
@@ -332,7 +398,7 @@ export default function AdminDashboard() {
     }
     
     return [];
-  }, [filteredPlans, orgMetric, historicalStats]);
+  }, [filteredPlans, orgMetric, filteredHistoricalStats]);
 
   // Strategy Chart Data - no historical fallback (strategy breakdown not available for historical data)
   const stratChartData = useMemo(() => {
@@ -348,7 +414,7 @@ export default function AdminDashboard() {
   }, [filteredPlans, stratMetric]);
 
   // Check if viewing historical year with no real data
-  const isHistoricalView = filteredPlans.length === 0 && historicalStats.length > 0;
+  const isHistoricalView = filteredPlans.length === 0 && filteredHistoricalStats.length > 0;
 
   const filteredLeaderboard = useMemo(() => {
     if (!deptSearch.trim()) return stats.byDepartment;
