@@ -144,7 +144,7 @@ export default function DataTable({ data, onEdit, onDelete, onStatusChange, load
                         </button>
                         {isAdmin && (
                           <button
-                            onClick={() => onDelete(item.id)}
+                            onClick={() => onDelete(item)}
                             className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                             title="Delete"
                           >

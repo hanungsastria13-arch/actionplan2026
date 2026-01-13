@@ -1,0 +1,86 @@
+import { AlertTriangle, X, Loader2 } from 'lucide-react';
+
+export default function ConfirmationModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  title = 'Confirm Action',
+  message = 'Are you sure you want to proceed?',
+  confirmText = 'Confirm',
+  cancelText = 'Cancel',
+  variant = 'danger', // 'danger' | 'warning' | 'info'
+  loading = false,
+}) {
+  if (!isOpen) return null;
+
+  const variantStyles = {
+    danger: {
+      icon: 'bg-red-100 text-red-600',
+      button: 'bg-red-600 hover:bg-red-700 focus:ring-red-500',
+    },
+    warning: {
+      icon: 'bg-amber-100 text-amber-600',
+      button: 'bg-amber-600 hover:bg-amber-700 focus:ring-amber-500',
+    },
+    info: {
+      icon: 'bg-blue-100 text-blue-600',
+      button: 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500',
+    },
+  };
+
+  const styles = variantStyles[variant] || variantStyles.danger;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div 
+        className="bg-white rounded-xl shadow-xl max-w-sm w-full animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="p-6 pb-4">
+          <div className="flex items-start gap-4">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${styles.icon}`}>
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+              <p className="mt-1 text-sm text-gray-500">{message}</p>
+            </div>
+            <button
+              onClick={onClose}
+              disabled={loading}
+              className="p-1 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="px-6 pb-6 flex gap-3">
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium text-sm disabled:opacity-50"
+          >
+            {cancelText}
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className={`flex-1 px-4 py-2.5 text-white rounded-lg transition-colors font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2 ${styles.button}`}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              confirmText
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

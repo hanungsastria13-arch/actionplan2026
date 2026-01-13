@@ -6,6 +6,7 @@ import { DEPARTMENTS, MONTHS, STATUS_OPTIONS } from '../lib/supabase';
 import DashboardCards from './DashboardCards';
 import DataTable from './DataTable';
 import ActionPlanModal from './ActionPlanModal';
+import ConfirmationModal from './ConfirmationModal';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -36,6 +37,10 @@ export default function DepartmentView({ departmentCode }) {
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [exporting, setExporting] = useState(false);
+  
+  // Delete confirmation modal state
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, planId: null, planTitle: '' });
+  const [deleting, setDeleting] = useState(false);
 
   const currentDept = DEPARTMENTS.find((d) => d.code === departmentCode);
 
@@ -172,14 +177,33 @@ export default function DepartmentView({ departmentCode }) {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this action plan?')) {
-      try {
-        await deletePlan(id);
-      } catch (error) {
-        console.error('Delete failed:', error);
-        alert('Failed to delete. Please try again.');
-      }
+  const handleDelete = (item) => {
+    // Open confirmation modal instead of window.confirm
+    setDeleteModal({
+      isOpen: true,
+      planId: item.id,
+      planTitle: item.action_plan || item.goal_strategy || 'this action plan',
+    });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteModal.planId) return;
+    
+    setDeleting(true);
+    try {
+      await deletePlan(deleteModal.planId);
+      setDeleteModal({ isOpen: false, planId: null, planTitle: '' });
+    } catch (error) {
+      console.error('Delete failed:', error);
+      alert('Failed to delete. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const closeDeleteModal = () => {
+    if (!deleting) {
+      setDeleteModal({ isOpen: false, planId: null, planTitle: '' });
     }
   };
 
@@ -359,6 +383,18 @@ export default function DepartmentView({ departmentCode }) {
         onSave={handleSave}
         editData={editData}
         departmentCode={departmentCode}
+      />
+
+      <ConfirmationModal
+        isOpen={deleteModal.isOpen}
+        onClose={closeDeleteModal}
+        onConfirm={confirmDelete}
+        title="Delete Action Plan"
+        message={`Are you sure you want to delete "${deleteModal.planTitle}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        loading={deleting}
       />
     </div>
   );
