@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { 
   Target, TrendingUp, CheckCircle2, Trophy, Medal, Award, Calendar, 
-  Search, X, Users, Upload, Download, ChevronDown 
+  Search, X, Users, Upload, Download, ChevronDown, AlertTriangle 
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea, ReferenceLine } from 'recharts';
 import Papa from 'papaparse';
@@ -9,6 +9,8 @@ import { useActionPlans } from '../hooks/useActionPlans';
 import { DEPARTMENTS, supabase } from '../lib/supabase';
 import ImportModal from './ImportModal';
 import PerformanceChart from './PerformanceChart';
+import StrategyDistributionChart from './StrategyDistributionChart';
+import BottleneckChart from './BottleneckChart';
 
 const MONTH_MAP = {
   'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
@@ -277,7 +279,16 @@ export default function AdminDashboard() {
     // Sort by rate descending
     byDepartment.sort((a, b) => b.rate - a.rate);
 
-    return { total, achieved, inProgress, pending, notAchieved, byDepartment };
+    // Calculate overdue count (status != 'Achieved' AND month < current month)
+    const currentMonthIndex = new Date().getMonth();
+    const overdue = filteredPlans.filter((p) => {
+      if (p.status === 'Achieved') return false;
+      const monthIndex = MONTH_MAP[p.month];
+      if (monthIndex === undefined) return false;
+      return monthIndex < currentMonthIndex;
+    }).length;
+
+    return { total, achieved, inProgress, pending, notAchieved, byDepartment, overdue };
   }, [filteredPlans, filteredHistoricalStats]);
 
   // YoY Line Chart Data with dynamic comparison and historical fallback
@@ -559,14 +570,17 @@ export default function AdminDashboard() {
             <div className="flex items-center gap-3"><div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center"><CheckCircle2 className="w-6 h-6" /></div>
               <div><p className="text-3xl font-bold">{stats.achieved}</p><p className="text-green-100 text-sm">Achieved Plans</p></div></div>
           </div>
-          <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-5 text-white">
-            <div className="flex items-center gap-3"><div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center"><Users className="w-6 h-6" /></div>
-              <div><p className="text-3xl font-bold">{stats.byDepartment.length}</p><p className="text-amber-100 text-sm">Active Departments</p></div></div>
+          <div className={`bg-gradient-to-br ${stats.overdue > 0 ? 'from-red-500 to-red-600' : 'from-gray-400 to-gray-500'} rounded-xl p-5 text-white`}>
+            <div className="flex items-center gap-3"><div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center"><AlertTriangle className="w-6 h-6" /></div>
+              <div><p className="text-3xl font-bold">{stats.overdue}</p><p className={`${stats.overdue > 0 ? 'text-red-100' : 'text-gray-200'} text-sm`}>Overdue / At Risk</p></div></div>
           </div>
         </div>
 
-        {/* YoY Trend Chart */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
+        {/* Decision Layer: YoY Trend (2/3) + Bottleneck Radar (1/3) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        
+        {/* YoY Trend Chart - Left Column (Span 2) */}
+        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-start justify-between mb-4">
             <div>
               <h3 className="text-lg font-semibold text-gray-800">Performance Trend (YoY)</h3>
@@ -632,12 +646,23 @@ export default function AdminDashboard() {
               <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#6b7280' }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: '#6b7280' }} tickFormatter={(v) => `${v}%`} />
               <Tooltip 
-                formatter={(value, name) => {
-                  if (value === null) return ['No data', name];
-                  const label = name === 'main_value' ? selectedYear : comparisonLabel;
-                  return [`${value}%`, label];
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="bg-white p-3 border border-gray-200 shadow-lg rounded-lg">
+                        <p className="font-bold text-gray-700 mb-2">{`Month: ${label}`}</p>
+                        {payload.map((entry, index) => (
+                          entry.value !== null && (
+                            <p key={index} style={{ color: entry.color }} className="text-sm font-medium">
+                              {`${entry.name}: ${entry.value}%`}
+                            </p>
+                          )
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
                 }}
-                labelFormatter={(label) => `Month: ${label}`}
               />
               {/* Reference Area to highlight selected date range */}
               {highlightRange && (
@@ -684,6 +709,17 @@ export default function AdminDashboard() {
             </LineChart>
           </ResponsiveContainer>
         </div>
+
+        {/* Bottleneck Radar - Right Column */}
+        <BottleneckChart plans={!isHistoricalView ? filteredPlans : []} getDeptName={getDeptName} />
+        </div>
+
+        {/* Strategic Focus Distribution - Full Width Below */}
+        {!isHistoricalView && filteredPlans.length > 0 && (
+          <div className="mb-6">
+            <StrategyDistributionChart plans={filteredPlans} />
+          </div>
+        )}
 
         {/* Charts Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
