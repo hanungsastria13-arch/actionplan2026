@@ -180,7 +180,14 @@ export default function DepartmentView({ departmentCode }) {
   };
 
   const handleDelete = (item) => {
-    // Open confirmation modal instead of window.confirm
+    // Safety check: Prevent deletion of achieved items for non-admins
+    // Admins have "God Mode" and can delete anything
+    if (item.status?.toLowerCase() === 'achieved' && !isAdmin) {
+      alert('Action Denied: You cannot delete a verified achievement. Please contact an Admin if this was marked in error.');
+      return;
+    }
+    
+    // Open confirmation modal
     setDeleteModal({
       isOpen: true,
       planId: item.id,

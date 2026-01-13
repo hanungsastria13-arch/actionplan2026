@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pencil, Trash2, ExternalLink, Target, Loader2, Clock } from 'lucide-react';
+import { Pencil, Trash2, ExternalLink, Target, Loader2, Clock, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { STATUS_OPTIONS } from '../lib/supabase';
 import HistoryModal from './HistoryModal';
@@ -142,15 +142,34 @@ export default function DataTable({ data, onEdit, onDelete, onStatusChange, load
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
-                        {isAdmin && (
-                          <button
-                            onClick={() => onDelete(item)}
-                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+                        {(() => {
+                          const isAchieved = item.status?.toLowerCase() === 'achieved';
+                          const isLocked = isAchieved && !isAdmin; // Locked ONLY if achieved AND NOT admin
+                          
+                          if (isLocked) {
+                            // Non-admin viewing achieved item: show locked button
+                            return (
+                              <button
+                                disabled
+                                className="p-1.5 text-gray-300 cursor-not-allowed rounded-lg"
+                                title="Locked: Cannot delete verified achievements"
+                              >
+                                <Lock className="w-4 h-4" />
+                              </button>
+                            );
+                          }
+                          
+                          // Admin (God Mode) OR non-achieved item: show normal delete button
+                          return (
+                            <button
+                              onClick={() => onDelete(item)}
+                              className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title={isAdmin && isAchieved ? "Delete (Admin Override)" : "Delete"}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          );
+                        })()}
                       </div>
                     </td>
                   </tr>
